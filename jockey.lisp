@@ -4,12 +4,12 @@
 (defparameter *output-port* nil)
 
 (defparameter *phase* 0.0)
-(defparameter *sample-rate* 44100.0)
+(defparameter *sample-rate* 48000.0)
 
 (cffi:defcallback process-callback :int ((nframes jack-nframes-t) (arg :pointer))
   (let ((out (jack-port-get-buffer *output-port* nframes)))
     (loop for i from 0 below nframes do
-      (setf (cffi:mem-aref out 'jack-default-audio-sample-t i) (coerce (sin *phase*) 'single-float))
+      (setf (cffi:mem-aref out 'jack-default-audio-sample-t i) (coerce (sin *phase*) 'jack-default-audio-sample-t))
       (incf *phase* (/ (* 2.0 pi 440.0) *sample-rate*))
       (when (>= *phase* (* 2.0 pi))
         (decf *phase* (* 2.0 pi))))
