@@ -3,17 +3,46 @@
 (defparameter *client* nil)
 (defparameter *output-port* nil)
 
-(defparameter *phase* 0.0)
 (defparameter *sample-rate* 48000.0)
 
+(defparameter *pcm-data* nil)
+(defparameter *pcm-index* 0)
 (cffi:defcallback process-callback :int ((nframes jack-nframes-t) (arg :pointer))
   (let ((out (jack-port-get-buffer *output-port* nframes)))
     (loop for i from 0 below nframes do
-      (setf (cffi:mem-aref out 'jack-default-audio-sample-t i) (coerce (sin *phase*) 'jack-default-audio-sample-t))
-      (incf *phase* (/ (* 2.0 pi 440.0) *sample-rate*))
-      (when (>= *phase* (* 2.0 pi))
-        (decf *phase* (* 2.0 pi))))
-    0))
+      (let ((sample (aref *pcm-data* (mod *pcm-index* (length *pcm-data*)))))
+        (setf (cffi:mem-aref out 'jack-default-audio-sample-t i)
+              (coerce sample 'jack-default-audio-sample-t)))
+      (incf *pcm-index*)
+      ))
+  0
+  )
+
+(defun read-16-bit-le (stream)
+  "read 16 bits in little endian, only for UNSIGNED"
+  (let ((byte1 (read-byte stream))
+        (byte2 (read-byte stream)))
+    (logior (ash byte2 8) byte1)))
+
+(defun normalize-16-bit (value)
+  (/ (- value 32768) 32768.0))
+
+(defun read-pcm-file (filename)
+  (with-open-file (stream filename
+                          :direction :input
+                          :element-type '(unsigned-byte 8))
+    (let* ((file-size (file-length stream))
+           (sample-count (/ file-size 4)) ; 1 sample = 2 bytes, and also consider stereo
+           (samples-left (make-array sample-count :element-type 'single-float))
+           (samples-right (make-array sample-count :element-type 'single-float)))
+      (loop for i from 0 below sample-count do
+        (let ((sample-left (normalize-16-bit (read-16-bit-le stream)))
+              (sample-right (normalize-16-bit (read-16-bit-le stream))))
+          (setf (aref samples-left i) sample-left)
+          (setf (aref samples-right i) sample-right)))
+      samples-left))
+  )
+
 
 (defun start-jack ()
   (if *client*

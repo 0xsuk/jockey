@@ -1,0 +1,1 @@
+molu.raw is generated  by "ffmpeg  -i mol53.mp3 -f u16le -ar 48000 molu.raw"
