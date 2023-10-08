@@ -17,17 +17,24 @@
 (defparameter *1-index* 0)
 (defparameter *1-speed* 1.0d0)
 
-; takes 60 to 200 micro seconds
-(cffi:defcallback process-callback :int ((nframes jack-nframes-t) (arg :pointer))
+(defun normalize-16-bit (value)
+  (/ (- value 32768) 32768.0)) ; (expt 2 15) = 32768
+
+(defun _process-callback (nframes)
+  "makeing process-callback lisp function to so that hotfix can be made"
   (let ((out (jack-port-get-buffer *output-port* nframes)))
     (loop for i from 0 below nframes do
       (let* ((position (floor *0-index*))
-            (sample (aref *0-left* (mod position *0-length*))))
-        (setf (cffi:mem-aref out 'jack-default-audio-sample-t i) sample))
+             (sample (aref *0-left* (mod position *0-length*))))
+        (setf (cffi:mem-aref out 'jack-default-audio-sample-t i) (normalize-16-bit sample)))
       (incf *0-index* *0-speed*)
       (when (>= *0-index* *0-length*)
         (setq *0-index* 0))
           ))
+  )
+; takes 60 to 200 micro seconds
+(cffi:defcallback process-callback :int ((nframes jack-nframes-t) (arg :pointer))
+  (_process-callback nframes)
   0
   )
 
@@ -36,9 +43,6 @@
   (let ((byte1 (read-byte stream))
         (byte2 (read-byte stream)))
     (logior (ash byte2 8) byte1)))
-
-(defun normalize-16-bit (value)
-  (/ (- value 32768) 32768.0)) ; (expt 2 15) = 32768
 
 (defun get-pcm-data (filename)
   (with-open-stream (stream
@@ -50,16 +54,15 @@
                                                  "-")
                                            :output :stream
                                            :element-type '(unsigned-byte 8))))
-    (let ((left-samples (make-array 0 :adjustable t :fill-pointer t :element-type 'jack-default-audio-sample-t))
-          (right-samples (make-array 0 :adjustable t :fill-pointer t :element-type 'jack-default-audio-sample-t)))
+    (let ((left-samples (make-array 0 :adjustable t :fill-pointer t :element-type '(unsigned-byte 16)))
+          (right-samples (make-array 0 :adjustable t :fill-pointer t :element-type '(unsigned-byte 16))))
       (handler-case
-          (loop
-            do
-               (let ((left-sample (normalize-16-bit (read-16-bit-le stream)))
-                     (right-sample (normalize-16-bit (read-16-bit-le stream))))
-                 (vector-push-extend left-sample left-samples)
-                 (vector-push-extend right-sample right-samples)
-                 ))
+          (loop do
+            (let ((left-sample (read-16-bit-le stream))
+                  (right-sample (read-16-bit-le stream)))
+              (vector-push-extend left-sample left-samples)
+              (vector-push-extend right-sample right-samples)
+              ))
         (end-of-file () (format t "END OF STREAM")))
       (values left-samples right-samples)
       )))
