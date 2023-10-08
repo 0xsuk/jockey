@@ -25,24 +25,38 @@
     (logior (ash byte2 8) byte1)))
 
 (defun normalize-16-bit (value)
-  (/ (- value 32768) 32768.0))
+  (/ (- value 32768) 32768.0)) ; (expt 2 15) = 32768
 
-(defun read-pcm-file (filename)
-  (with-open-file (stream filename
-                          :direction :input
-                          :element-type '(unsigned-byte 8))
-    (let* ((file-size (file-length stream))
-           (sample-count (/ file-size 4)) ; 1 sample = 2 bytes, and also consider stereo
-           (samples-left (make-array sample-count :element-type 'single-float))
-           (samples-right (make-array sample-count :element-type 'single-float)))
-      (loop for i from 0 below sample-count do
-        (let ((sample-left (normalize-16-bit (read-16-bit-le stream)))
-              (sample-right (normalize-16-bit (read-16-bit-le stream))))
-          (setf (aref samples-left i) sample-left)
-          (setf (aref samples-right i) sample-right)))
-      samples-left))
-  )
+(defun get-pcm-data (filename)
+  (with-open-stream (stream
+                     (uiop:process-info-output
+                      (uiop:launch-program (list "ffmpeg"
+                                                 "-i" filename
+                                                 "-f" "u16le"
+                                                 "-ar" "44100"
+                                                 "-")
+                                           :output :stream
+                                           :element-type '(unsigned-byte 8))))
+    (let ((left-samples (make-array 131072 :adjustable t :element-type 'jack-default-audio-sample-t))
+          (right-samples (make-array 131072 :adjustable t :element-type 'jack-default-audio-sample-t)))
+      (handler-case
+          (loop
+            with i = 0 do
+              (let ((left-sample (normalize-16-bit (read-16-bit-le stream)))
+                    (right-sample (normalize-16-bit (read-16-bit-le stream))))
+                (when (>= i (length left-samples))
+                  (adjust-array left-samples (+ 131072 (length left-samples)))
+                  (adjust-array right-samples (+ 131072 (length right-samples))))
+                (setf (aref left-samples i) left-sample)
+                (setf (aref right-samples i) right-sample)
+                (incf i)))
+        (end-of-file () (format t "END OF STREAM")))
+      left-samples
+      )))
 
+(defun set-pcm-data (filename)
+  (setq *pcm-data* (get-pcm-data filename))
+  (setq *pcm-data-length* (length *pcm-data*)))
 
 (defun start-jack ()
   (if *client*
