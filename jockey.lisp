@@ -3,18 +3,21 @@
 (defparameter *client* nil)
 (defparameter *output-port* nil)
 
-(defparameter *sample-rate* 48000.0)
+(defparameter *sample-rate* 44100.0)
+(defparameter *speed* 1.0d0)
 
 (defparameter *pcm-data* nil)
+(defparameter *pcm-data-length* nil)
 (defparameter *pcm-index* 0)
+; takes 60 to 200 micro seconds
 (cffi:defcallback process-callback :int ((nframes jack-nframes-t) (arg :pointer))
   (let ((out (jack-port-get-buffer *output-port* nframes)))
     (loop for i from 0 below nframes do
-      (let ((sample (aref *pcm-data* (mod *pcm-index* (length *pcm-data*)))))
-        (setf (cffi:mem-aref out 'jack-default-audio-sample-t i)
-              (coerce sample 'jack-default-audio-sample-t)))
-      (incf *pcm-index*)
-      ))
+      (let* ((position (floor *pcm-index*))
+            (sample (aref *pcm-data* (mod position *pcm-data-length*))))
+        (setf (cffi:mem-aref out 'jack-default-audio-sample-t i) sample))
+      (incf *pcm-index* *speed*)
+          ))
   0
   )
 
