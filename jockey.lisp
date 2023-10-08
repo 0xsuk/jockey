@@ -17,6 +17,8 @@
             (sample (aref *pcm-data* (mod position *pcm-data-length*))))
         (setf (cffi:mem-aref out 'jack-default-audio-sample-t i) sample))
       (incf *pcm-index* *speed*)
+      (when (>= *pcm-index* *pcm-data-length*)
+        (setq *pcm-index* 0))
           ))
   0
   )
