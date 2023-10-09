@@ -26,7 +26,7 @@
     (loop for i from 0 below nframes do
       (let* ((position (floor *0-index*))
              (sample (aref *0-left* (mod position *0-length*))))
-        (setf (cffi:mem-aref out 'jack-default-audio-sample-t i) (normalize-16-bit sample)))
+        (setf (cffi:mem-aref out 'jack-default-audio-sample i) (normalize-16-bit sample)))
       (incf *0-index* *0-speed*)
       (when (>= *0-index* *0-length*)
         (setq *0-index* 0))
@@ -68,16 +68,15 @@
       )))
 
 (defun set-pcm-data (track filename)
-  (multiple-value-bind (left right) (get-pcm-data filename)
-    (cond
-      ((= track 0) (setq *0-left* left
-                         *0-right* right
-                         *0-length* (length left))
-                   )
-      ((= track 1) (setq *1-left* left
-                         *1-right* right
-                         *1-length* (length right))))
-    ))
+  (cond
+    ((= track 0)
+     (multiple-value-setq (*0-left* *0-right*) (get-pcm-data filename))
+     (setq *0-length* (length *0-left*))
+     )
+    ((= track 1)
+     (multiple-value-setq (*1-left* *1-right*) (get-pcm-data filename))
+     (setq *1-length* (length *1-left*))
+     )))
 
 (defun start-jack ()
   (if *client*

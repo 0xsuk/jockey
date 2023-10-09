@@ -3,8 +3,8 @@
 (cffi:defctype size-t :unsigned-int)
 (cffi:defctype jack-nframes-t :uint32)
 (cffi:defctype jack-port-t :pointer)
-(cffi:defctype jack-default-audio-sample-t :float)
-(deftype jack-default-audio-sample-t () 'single-float)
+(cffi:defctype jack-default-audio-sample :float)
+(deftype jack-default-audio-sample () 'single-float)
 (defconstant +jack-default-audio-type+ "32 bit float mono audio")
 (defconstant +jack-port-is-output+ 2)
 
