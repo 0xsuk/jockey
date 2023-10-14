@@ -6,5 +6,6 @@
   :components (
                (:file "package")
                (:file "jack")
+               (:file "alsa")
                (:file "jockey"))
   )

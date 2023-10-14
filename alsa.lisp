@@ -1,5 +1,11 @@
 (in-package :jockey)
 
+(cffi:define-foreign-library libasound
+  (:unix (:or "libasound.so" "libasound.so.2"))
+  (t (:default "libasound")))
+
+(cffi:use-foreign-library libasound)
+
 (cffi:defctype snd-pcm-sframes :long)
 (cffi:defctype snd-pcm-uframes :unsigned-long)
 

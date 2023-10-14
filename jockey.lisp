@@ -100,3 +100,19 @@
   (jack-client-close *client*)
   (setq *client* nil) 
   )
+
+(defun start-alsa ()
+  (let ((err 0)
+        (playback-handle (cffi:null-pointer))
+        (hw-params (cffi:null-pointer)))
+    (setf err (snd-pcm-open playback-handle
+                            "default"
+                            1
+                            0))
+    (when (< err 0)
+      (error "cannot open audio device"))
+    (snd-pcm-hw-params-malloc hw-params)
+    (snd-pcm-hw-params-any playback-handle hw-params)
+    (snd-pcm-hw-params-set-access playback-handle hw-params :snd-pcm-access-rm)
+    
+    ))
