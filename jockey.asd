@@ -5,7 +5,7 @@
   :serial t
   :components (
                (:file "package")
-               (:file "jack")
+               (:file "cffi")
                (:file "alsa")
                (:file "jockey"))
   )
