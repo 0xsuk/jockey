@@ -8,18 +8,6 @@
 (defparameter left-deck nil)
 (defparameter right-deck nil)
 
-(defparameter *0-left* nil)
-(defparameter *0-right* nil)
-(defparameter *0-length* 0)
-(defparameter *0-index* 0)
-(defparameter *0-speed* 1.0d0)
-
-(defparameter *1-left* nil)
-(defparameter *1-right* nil)
-(defparameter *1-length* 0)
-(defparameter *1-index* 0)
-(defparameter *1-speed* 1.0d0)
-
 (defconstant +chunk-size+ (* 2048 1024))
 (defconstant +maximum-chunks+ 32)
 
@@ -165,32 +153,6 @@
           (format t "END OF STREAM")))
       track)
     ))
-
-(defun scratch (sec times)
-  (let ((old *0-speed*))
-    (loop repeat times do
-      (setq *0-speed* .5d0)
-      (sleep sec)
-      (setq *0-speed* -.5d0)
-      (sleep sec))
-    (setq *0-speed* old)
-    )
-  )
-
-(defun set-pcm-data (track filename)
-  (sb-ext:gc :full t)
-  (handler-case
-      (cond
-        ((= track 0)
-         (multiple-value-setq (*0-left* *0-right*) (get-pcm-data filename))
-         (setq *0-length* (length *0-left*))
-         )
-        ((= track 1)
-         (multiple-value-setq (*1-left* *1-right*) (get-pcm-data filename))
-         (setq *1-length* (length *1-left*))
-         ))
-    (storage-condition ()
-      (format t "File is too large"))))
 
 (defun start-jack ()
   (if *client*

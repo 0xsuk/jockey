@@ -6,6 +6,5 @@
   :components (
                (:file "package")
                (:file "cffi")
-               (:file "alsa")
                (:file "jockey"))
   )
