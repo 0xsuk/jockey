@@ -1,15 +1,9 @@
 (in-package :jockey)
 
-(cffi:defctype size-t :unsigned-int)
+(cffi:defctype size :unsigned-int)
 
-(cffi:defcfun malloc :pointer
-  (size size-t))
-
-(cffi:defcfun free :void
-  (ptr :pointer))
-
-(cffi:defctype jack-nframes-t :uint32)
-(cffi:defctype jack-port-t :pointer)
+(cffi:defctype jack-nframes :uint32)
+(cffi:defctype jack-port :pointer)
 (cffi:defctype jack-default-audio-sample :float)
 (deftype jack-default-audio-sample () 'single-float)
 (defconstant +jack-default-audio-type+ "32 bit float mono audio")
@@ -32,7 +26,7 @@
 
 (cffi:defcfun "jack_port_get_buffer" :pointer
   (port :pointer)
-  (nframes jack-nframes-t))
+  (nframes jack-nframes))
 
 (cffi:defcfun "jack_client_open" :pointer
   (client-name :string)
@@ -58,6 +52,12 @@
 (cffi:defcenum snd-pcm-stream
   (:snd-pcm-stream-playback 0)
   :snd-pcm-stream-capture)
+
+(cffi:defcenum snd-pcm-format
+  (:snd-pcm-format-s8 0)
+  (:snd-pcm-format-u8 1)
+  (:snd-pcm-format-s16-le 2)
+  (:snd-pcm-format-u16-le 4))
 
 (cffi:defcenum snd-pcm-access
   (:snd-pcm-acces-mmap-interleaved 0)
@@ -121,6 +121,16 @@
   (pcm :pointer)
   (buffer :pointer)
   (size snd-pcm-uframes))
+
+(cffi:defcfun "snd_pcm_set_params" :int
+  (pcm :pointer)
+  (format snd-pcm-format)
+  (access snd-pcm-access)
+  (channels :unsigned-int)
+  (rate :unsigned-int)
+  (soft-resample :int)
+  (latency :unsigned-int)
+  )
 
 (cffi:defcfun "snd_pcm_prepare" :int
   (pcm :pointer))

@@ -85,7 +85,7 @@
           (reset-index left-deck)))))
 
 ; takes 60 to 200 micro seconds
-(cffi:defcallback process-callback :int ((nframes jack-nframes-t) (arg :pointer))
+(cffi:defcallback process-callback :int ((nframes jack-nframes) (arg :pointer))
   (declare (ignore arg))
   (_process-callback nframes)
   0
@@ -177,18 +177,30 @@
   (setq *client* nil) 
   )
 
-(defun start-alsa ()
+(defun alsa-start ()
   (let ((err 0)
-        (playback-handle (cffi:null-pointer))
-        (hw-params (cffi:null-pointer)))
-    (setf err (snd-pcm-open playback-handle
-                            "default"
-                            1
+        (pcm (cffi:foreign-alloc :pointer)))
+    (setq err (snd-pcm-open pcm
+                            "plughw:CARD=PCH,DEV=0"
+                            0
                             0))
     (when (< err 0)
       (error "cannot open audio device"))
-    (snd-pcm-hw-params-malloc hw-params)
-    (snd-pcm-hw-params-any playback-handle hw-params)
-    (snd-pcm-hw-params-set-access playback-handle hw-params :snd-pcm-access-rm)
+
+    (snd-pcm-set-params pcm
+                        :snd-pcm-format-s16-le
+                        :snd_pcm_access_rw_interleaved
+                        1
+                        44100
+                        0
+                        1000)
     
+    ;; (let* ((buffer-size 44100)
+          ;; (buffer (cffi:foreign-alloc :unsigned-short :count buffer-size)))
+
+      ;; (cffi:foreign-free buffer))
+
+    (snd-pcm-drain pcm)
+    (snd-pcm-close pcm)
     ))
+
