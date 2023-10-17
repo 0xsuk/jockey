@@ -24,9 +24,9 @@
 ; track that exceeds 32 chunks will be partially loaded
 ; total sample (left + right) is 2^28, each 2^27
 ; length, index is a measure of a single channel
+; track is mono channel
 (defstruct track
-  (left-chunks (make-chunks) :type chunks-t)
-  (right-chunks (make-chunks) :type chunks-t)
+  (chunks (make-chunks) :type chunks-t)
   (chunk-length 0 :type (unsigned-byte 6)) ; maximum-chunks 32 = 2^5
   (length 0 :type (unsigned-byte 28)) ; measures a single channel
   (index 0d0 :type double-float)
@@ -36,7 +36,7 @@
 
 ;; (defun free-chunks (track)
   ;; (let ((chunk-length (/ (track-length track) ))))
-  ;; (track-left-chunks track))
+  ;; (track-chunks track))
 
 (defun normalize-16-bit (value)
   (/ (- value 32768) 32768.0)) ; (expt 2 15) = 32768
@@ -62,7 +62,7 @@
   (let* ((position (get-position track))
          (index-of-chunk (get-index-of-chunk position))
          (index-in-chunk (get-index-in-chunk position))
-         (chunk (aref (track-left-chunks track) index-of-chunk))
+         (chunk (aref (track-chunks track) index-of-chunk))
          )
     (cffi:mem-aref chunk :unsigned-short index-in-chunk)
     ))
@@ -76,9 +76,9 @@
   (loop
     with out = (jack-port-get-buffer *output-port* nframes)
     for i from 0 below nframes do
-      (let* ((left-sample (get-sample left-deck)))
+      (let* ((sample (get-sample left-deck)))
         (setf (cffi:mem-aref out 'jack-default-audio-sample i)
-              (normalize-16-bit left-sample)
+              (normalize-16-bit sample)
               )
         (incf (track-index left-deck) (track-speed left-deck))
         (when (>= (track-index left-deck) (track-length left-deck))
@@ -104,6 +104,7 @@
                                                   "-i" ,filename
                                                   "-f" "u16le"
                                                   "-ar" "44100"
+                                                  "-ac" "1"
                                                   "-")
                                             :output :stream
                                             :element-type '(unsigned-byte 8))))
@@ -114,8 +115,7 @@
   (with-pcm-stream (stream filename)
     (let ((track (make-track))
           (index-of-chunk 0)
-          (left-chunk (make-chunk))
-          (right-chunk (make-chunk))
+          (chunk (make-chunk))
           (chunk-length 1)
           (index-in-chunk 0))
       (handler-case
@@ -124,32 +124,25 @@
               (format t "Track is full size")
               (return))
             
-            (setf (cffi:mem-aref left-chunk :unsigned-short index-in-chunk)
-                  (read-16-bit-le stream))
-            (setf (cffi:mem-aref right-chunk :unsigned-short index-in-chunk)
+            (setf (cffi:mem-aref chunk :unsigned-short index-in-chunk)
                   (read-16-bit-le stream))
             (incf index-in-chunk)
             
             (when (>= index-in-chunk +chunk-size+)
               (incf (track-length track) index-in-chunk)
-              (setf (aref (track-left-chunks track) index-of-chunk)
-                    left-chunk)
-              (setf (aref (track-right-chunks track) index-of-chunk)
-                    right-chunk)
+              (setf (aref (track-chunks track) index-of-chunk)
+                    chunk)
               
               (incf index-of-chunk)
-              (setf left-chunk (make-chunk)
-                    right-chunk (make-chunk))
+              (setf chunk (make-chunk))
               (incf chunk-length)
               (setf index-in-chunk 0)
               ))
         (end-of-file ()
           (setf (track-chunk-length track) chunk-length)
           (incf (track-length track) (1+ index-in-chunk))
-          (setf (aref (track-left-chunks track) index-of-chunk)
-                left-chunk)
-          (setf (aref (track-right-chunks track) index-of-chunk)
-                right-chunk)
+          (setf (aref (track-chunks track) index-of-chunk)
+                chunk)
           (format t "END OF STREAM")))
       track)
     ))
