@@ -25,7 +25,7 @@
 ; total sample (left + right) is 2^28, each 2^27
 ; length, index is a measure of a single channel
 ; track is mono channel
-(defstruct track
+(defstruct. track
   (chunks (make-chunks) :type chunks-t)
   (chunk-length 0 :type (unsigned-byte 6)) ; maximum-chunks 32 = 2^5
   (length 0 :type (unsigned-byte 28)) ; measures a single channel
@@ -42,23 +42,19 @@
   (/ (- value 32768) 32768.0)) ; (expt 2 15) = 32768
 
 
-(declaim (inline get-position))
-(defun get-position (track)
+(defun-inline get-position (track)
   (floor (track-index track)))
 
-(declaim (inline get-index-in-chunk))
-(defun get-index-in-chunk (position)
+(defun-inline get-index-in-chunk (position)
   (let ((index-of-chunk (floor (/ position +chunk-size+))))
     (- position (* +chunk-size+ index-of-chunk)))
   )
 
-(declaim (inline get-index-of-chunk))
-(defun get-index-of-chunk (position)
+(defun-inline get-index-of-chunk (position)
   (floor (/ position +chunk-size+))
   )
 
-(declaim (inline get-sample))
-(defun get-sample (track)
+(defun-inline get-sample (track)
   (let* ((position (get-position track))
          (index-of-chunk (get-index-of-chunk position))
          (index-in-chunk (get-index-in-chunk position))
@@ -67,22 +63,24 @@
     (cffi:mem-aref chunk :unsigned-short index-in-chunk)
     ))
 
-(declaim (inline reset-index))
-(defun reset-index (track)
+(defun-inline reset-index (track)
   (setf (track-index track) 0d0))
 
 (defun _process-callback (nframes)
   "makeing process-callback lisp function to so that hotfix can be made"
-  (loop
-    with out = (jack-port-get-buffer *output-port* nframes)
-    for i from 0 below nframes do
-      (let* ((sample (get-sample left-deck)))
-        (setf (cffi:mem-aref out 'jack-default-audio-sample i)
-              (normalize-16-bit sample)
-              )
-        (incf (track-index left-deck) (track-speed left-deck))
-        (when (>= (track-index left-deck) (track-length left-deck))
-          (reset-index left-deck)))))
+  (with-track left-deck
+    (loop
+      with out = (jack-port-get-buffer *output-port* nframes)
+      for i from 0 below nframes do
+        (let* ((sample (get-sample left-deck)))
+          (setf (cffi:mem-aref out 'jack-default-audio-sample i)
+                (normalize-16-bit sample)
+                )
+          (incf left-deck.index left-deck.speed)
+          (when (>= left-deck.index left-deck.length)
+            (if left-deck.next
+                (setf left-deck left-deck.next)
+                (reset-index left-deck)))))))
 
 ; takes 60 to 200 micro seconds
 (cffi:defcallback process-callback :int ((nframes jack-nframes) (arg :pointer))
@@ -118,32 +116,33 @@
           (chunk (make-chunk))
           (chunk-length 1)
           (index-in-chunk 0))
-      (handler-case
-          (loop do
-            (when (>= index-of-chunk +maximum-chunks+)
-              (format t "Track is full size")
-              (return))
-            
-            (setf (cffi:mem-aref chunk :unsigned-short index-in-chunk)
-                  (read-16-bit-le stream))
-            (incf index-in-chunk)
-            
-            (when (>= index-in-chunk +chunk-size+)
-              (incf (track-length track) index-in-chunk)
-              (setf (aref (track-chunks track) index-of-chunk)
-                    chunk)
+      (with-track track
+        (handler-case
+            (loop do
+              (when (>= index-of-chunk +maximum-chunks+)
+                (format t "Track is full size")
+                (return))
               
-              (incf index-of-chunk)
-              (setf chunk (make-chunk))
-              (incf chunk-length)
-              (setf index-in-chunk 0)
-              ))
-        (end-of-file ()
-          (setf (track-chunk-length track) chunk-length)
-          (incf (track-length track) (1+ index-in-chunk))
-          (setf (aref (track-chunks track) index-of-chunk)
-                chunk)
-          (format t "END OF STREAM")))
+              (setf (cffi:mem-aref chunk :unsigned-short index-in-chunk)
+                    (read-16-bit-le stream))
+              (incf index-in-chunk)
+              
+              (when (>= index-in-chunk +chunk-size+)
+                (incf track.length index-in-chunk)
+                (setf (aref track.chunks index-of-chunk)
+                      chunk)
+                
+                (incf index-of-chunk)
+                (setf chunk (make-chunk))
+                (incf chunk-length)
+                (setf index-in-chunk 0)
+                ))
+          (end-of-file ()
+            (setf track.chunk-length chunk-length)
+            (incf track.length (1+ index-in-chunk))
+            (setf (aref track.chunks index-of-chunk)
+                  chunk)
+            (format t "END OF STREAM"))))
       track)
     ))
 
@@ -170,30 +169,59 @@
   (setq *client* nil) 
   )
 
+(defmacro with-pointers (pairs &body body)
+  "each pair is (var :type).
+body can contain -ref macro, that gets mem-ref of the var.
+
+(with-pointer ((a-ptr :int))
+  (setf a (-ref a-ptr)))
+"
+  `(let ,(mapcar (lambda (pair)
+                   (unless (and (listp pair) (second pair))
+                     (error (format nil "~A should be (variable :type)" pair)))
+                   `(,(first pair) (cffi:foreign-alloc ,(second pair))))
+          pairs)
+     (macrolet ((-ref (var)
+                  (let* ((pair (or (assoc var ',pairs)
+                                   (error (format nil "~A is not valid variable" var))))
+                         (type (cadr pair)))
+                    `(cffi:mem-ref ,var ,type)
+                    )))
+       ,@body)))
+
 (defun alsa-start ()
   (let ((err 0)
-        (pcm (cffi:foreign-alloc :pointer)))
-    (setq err (snd-pcm-open pcm
+        pcm
+        buffer-size
+        period-size)
+    (setf err (snd-pcm-open pcm-ptr
                             "plughw:CARD=PCH,DEV=0"
                             0
                             0))
     (when (< err 0)
-      (error "cannot open audio device"))
+      (error (snd-strerror err)))
 
+    (setf pcm (cffi:mem-ref pcm-ptr :pointer))
     (snd-pcm-set-params pcm
-                        :snd-pcm-format-s16-le
+                        :snd-pcm-format-u16-le
                         :snd_pcm_access_rw_interleaved
                         1
                         44100
                         0
                         1000)
     
-    ;; (let* ((buffer-size 44100)
-          ;; (buffer (cffi:foreign-alloc :unsigned-short :count buffer-size)))
-
-      ;; (cffi:foreign-free buffer))
-
+    
+    (with-pointers ((buffer-size& :int)
+                    (period-size& :int))
+      (snd-pcm-get-params pcm buffer-size& period-size&)
+      (setf buffer-size (-ref buffer-size&)
+            period-size (-ref period-size&)))
+    
+    (let ((buffer (cffi:foreign-alloc :unsigned-short :count buffer-size)))
+      (cffi:foreign-free buffer))
+    
     (snd-pcm-drain pcm)
     (snd-pcm-close pcm)
     ))
+
 

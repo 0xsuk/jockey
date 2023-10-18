@@ -1,7 +1,8 @@
 (asdf:defsystem :jockey
   :name "jockey"
   :author "0xsuk"
-  :depends-on (:cffi)
+  :depends-on (:cffi
+               :suk)
   :serial t
   :components (
                (:file "package")

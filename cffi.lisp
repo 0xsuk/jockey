@@ -132,6 +132,11 @@
   (latency :unsigned-int)
   )
 
+(cffi:defcfun "snd_pcm_get_params" :int
+  (pcm :pointer)
+  (buffer_size :pointer)
+  (period_size :pointer))
+
 (cffi:defcfun "snd_pcm_prepare" :int
   (pcm :pointer))
 
