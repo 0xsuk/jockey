@@ -189,39 +189,72 @@ body can contain -ref macro, that gets mem-ref of the var.
                     )))
        ,@body)))
 
-(defun alsa-start ()
+(defun pc ()
+  (alsa-start "plughw:CARD=PCH,DEV=0" 3000000))
+
+(defconstant +dphase+ (/ (* 2 pi 440) 44100))
+(defconstant +2pi+ (* 2 pi))
+(defparameter *phase* 0)
+;; (defun alsa-callback (buffer period-size)
+;;         )
+;;   )
+
+(defun alsa-start (device latency &optional (format :snd-pcm-format-u16-le) (access :snd_pcm_access_rw_interleaved))
   (let ((err 0)
         pcm
         buffer-size
         period-size)
-    (setf err (snd-pcm-open pcm-ptr
-                            "plughw:CARD=PCH,DEV=0"
-                            0
-                            0))
-    (when (< err 0)
-      (error (snd-strerror err)))
-
-    (setf pcm (cffi:mem-ref pcm-ptr :pointer))
-    (snd-pcm-set-params pcm
-                        :snd-pcm-format-u16-le
-                        :snd_pcm_access_rw_interleaved
-                        1
-                        44100
-                        0
-                        1000)
-    
-    
-    (with-pointers ((buffer-size& :int)
-                    (period-size& :int))
-      (snd-pcm-get-params pcm buffer-size& period-size&)
-      (setf buffer-size (-ref buffer-size&)
-            period-size (-ref period-size&)))
-    
-    (let ((buffer (cffi:foreign-alloc :unsigned-short :count buffer-size)))
-      (cffi:foreign-free buffer))
-    
-    (snd-pcm-drain pcm)
-    (snd-pcm-close pcm)
-    ))
+    (unwind-protect
+         (progn 
+           (with-pointers ((pcm& :pointer))
+             (setf err (snd-pcm-open pcm&
+                                     device
+                                     0
+                                     0))
+             (when (< err 0)
+               (error (snd-strerror err)))
+             (setf pcm (-ref pcm&))
+             )
+           
+           (snd-pcm-set-params pcm
+                               format
+                               access
+                               1
+                               44100
+                               0
+                               latency)
+           
+           
+           (with-pointers ((buffer-size& :int)
+                           (period-size& :int))
+             (snd-pcm-get-params pcm buffer-size& period-size&)
+             (setf buffer-size (-ref buffer-size&)
+                   period-size (-ref period-size&)))
+           
+           (format t "~A and ~A~%" buffer-size period-size)
+           
+           (loop
+             for buffer = (cffi:foreign-alloc :unsigned-short :count period-size) do
+               (loop for i from 0 to period-size
+                     do
+                        (setf (cffi:mem-aref buffer :unsigned-short i)
+                              (round (* 32767.5 (1+ (sin *phase*)))))
+                        (incf *phase* +dphase+)
+                        (if (>= *phase* +2pi+)
+                            (decf *phase* +2pi+)))
+               (setf err (snd-pcm-writei pcm buffer period-size))
+               (when (= err 32)
+                 (format t "Underrun: ~A" (snd-strerror err))
+                 (snd-pcm-prepare pcm))
+               (when (< err 0)
+                 (error (format nil "Serious error: ~A" (snd-strerror err))))
+               (cffi:foreign-free buffer))
+           )
+      (setf err (snd-pcm-drain pcm))
+      (when (< err 0)
+        (error (format nil "drain failed: ~A" (snd-strerror err))))
+      (snd-pcm-close pcm)
+      
+      )))
 
 
