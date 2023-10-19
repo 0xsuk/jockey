@@ -190,7 +190,7 @@ body can contain -ref macro, that gets mem-ref of the var.
        ,@body)))
 
 (defun pc ()
-  (alsa-start "plughw:CARD=PCH,DEV=0" 3000000))
+  (alsa-start "plughw:CARD=PCH,DEV=0" 20000))
 
 (defconstant +dphase+ (/ (* 2 pi 440) 44100))
 (defconstant +2pi+ (* 2 pi))
@@ -234,7 +234,7 @@ body can contain -ref macro, that gets mem-ref of the var.
            (format t "~A and ~A~%" buffer-size period-size)
            
            (loop
-             for buffer = (cffi:foreign-alloc :unsigned-short :count period-size) do
+             with buffer = (cffi:foreign-alloc :unsigned-short :count period-size) do
                (loop for i from 0 to period-size
                      do
                         (setf (cffi:mem-aref buffer :unsigned-short i)
@@ -243,12 +243,14 @@ body can contain -ref macro, that gets mem-ref of the var.
                         (if (>= *phase* +2pi+)
                             (decf *phase* +2pi+)))
                (setf err (snd-pcm-writei pcm buffer period-size))
+               
                (when (= err 32)
-                 (format t "Underrun: ~A" (snd-strerror err))
+                 (princ "underrun")
                  (snd-pcm-prepare pcm))
                (when (< err 0)
                  (error (format nil "Serious error: ~A" (snd-strerror err))))
-               (cffi:foreign-free buffer))
+               
+             finally (cffi:foreign-free buffer))
            )
       (setf err (snd-pcm-drain pcm))
       (when (< err 0)
