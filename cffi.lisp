@@ -1,12 +1,10 @@
 (in-package :jockey)
 
 (cffi:defctype size :unsigned-int)
-
 (cffi:defctype jack-nframes :uint32)
 (cffi:defctype jack-port :pointer)
 (cffi:defctype jack-default-audio-sample :float)
 (deftype jack-default-audio-sample () 'single-float)
-(defconstant +jack-default-audio-type+ "32 bit float mono audio")
 (defconstant +jack-port-is-output+ 2)
 (cffi:define-foreign-library libjack
   (:unix (:or "libjack.so" "libjack.so.0"))
@@ -109,6 +107,17 @@
   (pcm :pointer)
   (params :pointer)
   (val :unsigned-int))
+
+(cffi:defcfun "snd_pcm_hw_params_set_period_size_near" :int
+  (pcm :pointer)
+  (params :pointer)
+  (val :pointer)
+  (dir :pointer))
+
+(cffi:defcfun "snd_pcm_hw_params_set_buffer_size_near" :int
+  (pcm :pointer)
+  (params :pointer)
+  (val :pointer))
 
 (cffi:defcfun "snd_pcm_hw_params" :int
   (pcm :pointer)

@@ -1,9 +1,10 @@
+
 (in-package :jockey)
 
 (defparameter *client* nil)
 (defparameter *output-port* nil)
 
-(defparameter *sample-rate* 44100.0)
+(defparameter *sample-rate* 44100)
 
 (defparameter left-deck nil)
 (defparameter right-deck nil)
@@ -66,29 +67,6 @@
 (defun-inline reset-index (track)
   (setf (track-index track) 0d0))
 
-(defun _process-callback (nframes)
-  "makeing process-callback lisp function to so that hotfix can be made"
-  (with-track left-deck
-    (loop
-      with out = (jack-port-get-buffer *output-port* nframes)
-      for i from 0 below nframes do
-        (let* ((sample (get-sample left-deck)))
-          (setf (cffi:mem-aref out 'jack-default-audio-sample i)
-                (normalize-16-bit sample)
-                )
-          (incf left-deck.index left-deck.speed)
-          (when (>= left-deck.index left-deck.length)
-            (if left-deck.next
-                (setf left-deck left-deck.next)
-                (reset-index left-deck)))))))
-
-; takes 60 to 200 micro seconds
-(cffi:defcallback process-callback :int ((nframes jack-nframes) (arg :pointer))
-  (declare (ignore arg))
-  (_process-callback nframes)
-  0
-  )
-
 (defun read-16-bit-le (stream)
   "read 16 bits in little endian, only for UNSIGNED"
   (let ((byte1 (read-byte stream))
@@ -146,29 +124,6 @@
       track)
     ))
 
-(defun start-jack ()
-  (if *client*
-      (close-jack))
-  (setq *client* (jack-client-open "my-client" 0 (cffi:null-pointer)))
-  (if (cffi:null-pointer-p *client*)
-      (error "client not initialied"))
-
-  (jack-set-process-callback *client* (cffi:callback process-callback) 0)
-
-  (setq *output-port* (jack-port-register *client* "output" +jack-default-audio-type+ +jack-port-is-output+ 0))
-  
-  (if (cffi:null-pointer-p *output-port*)
-      (error "output port registeration failed"))
-  
-  (unless (= 0 (jack-activate *client*))
-    (format t "failed to activate client"))
-  )
-
-(defun close-jack ()
-  (jack-client-close *client*)
-  (setq *client* nil) 
-  )
-
 (defmacro with-pointers (pairs &body body)
   "each pair is (var :type).
 body can contain -ref macro, that gets mem-ref of the var.
@@ -189,74 +144,93 @@ body can contain -ref macro, that gets mem-ref of the var.
                     )))
        ,@body)))
 
-(defun pc ()
-  (alsa-start "plughw:CARD=PCH,DEV=0" 20000))
+(defparameter *period-size* 512)
 
 (defconstant +dphase+ (/ (* 2 pi 440) 44100))
 (defconstant +2pi+ (* 2 pi))
 (defparameter *phase* 0)
-;; (defun alsa-callback (buffer period-size)
-;;         )
-;;   )
 
-(defun alsa-start (device latency &optional (format :snd-pcm-format-u16-le) (access :snd_pcm_access_rw_interleaved))
-  (let ((err 0)
-        pcm
-        buffer-size
-        period-size)
-    (unwind-protect
-         (progn 
-           (with-pointers ((pcm& :pointer))
-             (setf err (snd-pcm-open pcm&
+(defun alsa-setup (handle& buffer-size& period-size&)
+  (cffi:with-foreign-object (hw-params&& :pointer) ; pointer to pointer
+    (symbol-macrolet ((hw-params& (cffi:mem-ref hw-params&& :pointer)))
+      (snd-pcm-hw-params-malloc hw-params&&)
+      (snd-pcm-hw-params-any handle& hw-params&)
+      (snd-pcm-hw-params-set-access handle& hw-params& :snd_pcm_access_rw_interleaved)
+      (snd-pcm-hw-params-set-format handle& hw-params& 2)
+      (snd-pcm-hw-params-set-rate handle& hw-params& *sample-rate* 0)
+      (snd-pcm-hw-params-set-channels handle& hw-params& 2)
+      (snd-pcm-hw-params-set-period-size-near handle& hw-params& period-size& (cffi:null-pointer))
+      (snd-pcm-hw-params-set-buffer-size-near handle& hw-params& buffer-size&)
+      (snd-pcm-hw-params handle& hw-params&)
+      (snd-pcm-get-params handle& buffer-size& period-size&)
+      (snd-pcm-hw-params-free hw-params&))))
+
+(defvar handle-ref)
+
+(defvar buffer-ref nil)
+
+(defun start ()
+  (alsa-start "hw:CARD=PCH,DEV=0"))
+
+(defun fill-buffer (buffer&)
+  (loop for i from 0 to *period-size*
+        do
+           (let ((sample (round (* 32767 (sin *phase*)))))
+             (setf (cffi:mem-aref buffer& :short (* 2 i))
+                   sample)
+             (setf (cffi:mem-aref buffer& :short (1+ (* i 2)))
+                   sample))
+           (incf *phase* +dphase+)
+           (if (>= *phase* +2pi+)
+               (decf *phase* +2pi+))
+        )
+  )
+
+(defun alsa-start (device)
+  (let ((err 0))
+    (cffi:with-foreign-object (handle&& :pointer)
+      (setf handle-ref handle&&)
+      (unwind-protect
+           (progn 
+             (setf err (snd-pcm-open handle&&
                                      device
                                      0
                                      0))
              (when (< err 0)
                (error (snd-strerror err)))
-             (setf pcm (-ref pcm&))
-             )
-           
-           (snd-pcm-set-params pcm
-                               format
-                               access
-                               1
-                               44100
-                               0
-                               latency)
-           
-           
-           (with-pointers ((buffer-size& :int)
-                           (period-size& :int))
-             (snd-pcm-get-params pcm buffer-size& period-size&)
-             (setf buffer-size (-ref buffer-size&)
-                   period-size (-ref period-size&)))
-           
-           (format t "~A and ~A~%" buffer-size period-size)
-           
-           (loop
-             with buffer = (cffi:foreign-alloc :unsigned-short :count period-size) do
-               (loop for i from 0 to period-size
-                     do
-                        (setf (cffi:mem-aref buffer :unsigned-short i)
-                              (round (* 32767.5 (1+ (sin *phase*)))))
-                        (incf *phase* +dphase+)
-                        (if (>= *phase* +2pi+)
-                            (decf *phase* +2pi+)))
-               (setf err (snd-pcm-writei pcm buffer period-size))
+             
+             (cffi:with-foreign-objects ((buffer-size& :int)
+                                         (period-size& :int))
+               (setf (cffi:mem-ref period-size& :int) *period-size*)
+               (setf (cffi:mem-ref buffer-size& :int) (* *period-size* 2))
+               (format t "want: ~A and ~A~%" (cffi:mem-ref buffer-size& :int) (cffi:mem-ref period-size& :int))
+               (alsa-setup (cffi:mem-ref handle&& :pointer) buffer-size& period-size&)
+               (setf *period-size* (cffi:mem-ref period-size& :int))
+
                
-               (when (= err 32)
-                 (princ "underrun")
-                 (snd-pcm-prepare pcm))
-               (when (< err 0)
-                 (error (format nil "Serious error: ~A" (snd-strerror err))))
-               
-             finally (cffi:foreign-free buffer))
-           )
-      (setf err (snd-pcm-drain pcm))
-      (when (< err 0)
-        (error (format nil "drain failed: ~A" (snd-strerror err))))
-      (snd-pcm-close pcm)
-      
+               (format t "got: ~A and ~A~%" (cffi:mem-ref buffer-size& :int) *period-size*))
+             
+             (loop
+               with buffer& = (cffi:foreign-alloc :short :count (* 2 *period-size*)) do
+                 (fill-buffer buffer&)
+                 (setf err (snd-pcm-writei (cffi:mem-ref handle&& :pointer) buffer& *period-size*))
+                 
+                 (when (= err 32)
+                   (princ "underrun")
+                   (snd-pcm-prepare (cffi:mem-ref handle&& :pointer)))
+                 (when (< err 0)
+                   (error (format nil "Serious error: ~A" (snd-strerror err))))
+               ))
+        
+        (format t "closing")
+        (unwind-protect 
+             (setf err (snd-pcm-drain (cffi:mem-ref handle&& :pointer)))
+          (format  t "tried"))
+        (when (< err 0)
+          (error (format nil "drain failed: ~A" (snd-strerror err))))
+        (snd-pcm-close (cffi:mem-ref handle&& :pointer))
+        (format t "closed")
+        )
       )))
 
 
