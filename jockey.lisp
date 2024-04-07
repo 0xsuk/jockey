@@ -1,6 +1,8 @@
 
 (in-package :jockey)
 
+(declaim (optimize (speed 3) (safety 0)))
+
 (defparameter *client* nil)
 (defparameter *output-port* nil)
 
@@ -191,7 +193,7 @@ body can contain -ref macro, that gets mem-ref of the var.
     (cffi:with-foreign-object (handle&& :pointer)
       (setf handle-ref handle&&)
       (unwind-protect
-           (progn 
+           (progn
              (setf err (snd-pcm-open handle&&
                                      device
                                      0
@@ -215,11 +217,13 @@ body can contain -ref macro, that gets mem-ref of the var.
                  (fill-buffer buffer&)
                  (setf err (snd-pcm-writei (cffi:mem-ref handle&& :pointer) buffer& *period-size*))
                  
-                 (when (= err 32)
-                   (princ "underrun")
-                   (snd-pcm-prepare (cffi:mem-ref handle&& :pointer)))
-                 (when (< err 0)
-                   (error (format nil "Serious error: ~A" (snd-strerror err))))
+                 (if (= err -32)
+                     (progn
+                       ;; (princ "underrun")
+                       (snd-pcm-prepare (cffi:mem-ref handle&& :pointer)))
+                     (when (< err 0)
+                       (snd-pcm-recover (cffi:mem-ref handle&& :pointer) err 0)
+                       (error (format nil "Serious error: ~A" (snd-strerror err)))))
                ))
         
         (format t "closing")

@@ -154,3 +154,8 @@
 
 (cffi:defcfun "snd_pcm_close" :int
   (pcm :pointer))
+
+(cffi:defcfun "snd_pcm_recover" :int
+  (pcm :pointer)
+  (err :int)
+  (silent :int))
