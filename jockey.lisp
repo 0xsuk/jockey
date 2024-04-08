@@ -1,4 +1,3 @@
-
 (in-package :jockey)
 
 (declaim (optimize (speed 3) (safety 0)))
@@ -146,7 +145,7 @@ body can contain -ref macro, that gets mem-ref of the var.
                     )))
        ,@body)))
 
-(defparameter *period-size* 512)
+(defparameter *period-size* 32)
 
 (defconstant +dphase+ (/ (* 2 pi 440) 44100))
 (defconstant +2pi+ (* 2 pi))
@@ -174,19 +173,43 @@ body can contain -ref macro, that gets mem-ref of the var.
 (defun start ()
   (alsa-start "hw:CARD=PCH,DEV=0"))
 
+(defun zero-buffer (buffer&)
+  (loop for i below (* 2 *period-size*) do
+        (setf (cffi:mem-aref buffer& :short i) 0))
+  )
+
+(defun fill-frame (buffer& i)
+  (let ((sample (round (* 32767 (sin *phase*)))))
+    (setf (cffi:mem-aref buffer& :short (* 2 i))
+          sample)
+    (setf (cffi:mem-aref buffer& :short (1+ (* i 2)))
+          sample)
+    )
+  (incf *phase* +dphase+)
+  (if (>= *phase* +2pi+)
+      (decf *phase* +2pi+))
+  )
+
 (defun fill-buffer (buffer&)
-  (loop for i from 0 to *period-size*
-        do
-           (let ((sample (round (* 32767 (sin *phase*)))))
-             (setf (cffi:mem-aref buffer& :short (* 2 i))
-                   sample)
-             (setf (cffi:mem-aref buffer& :short (1+ (* i 2)))
-                   sample))
-           (incf *phase* +dphase+)
-           (if (>= *phase* +2pi+)
-               (decf *phase* +2pi+))
+  (loop for i below *period-size*
+        do (fill-frame buffer& i)
         )
   )
+
+(defun alsa-loop (handle&&)
+  (loop
+    with buffer& = (cffi:foreign-alloc :short :count (* 2 *period-size*))
+    do
+       (fill-buffer buffer&)
+       (let ((err (snd-pcm-writei (cffi:mem-ref handle&& :pointer) buffer& *period-size*)))
+         (if (= err -32)
+             (progn
+               ;; (princ "underrun")
+               (snd-pcm-prepare (cffi:mem-ref handle&& :pointer)))
+             (when (< err 0)
+               (snd-pcm-recover (cffi:mem-ref handle&& :pointer) err 0)
+               (error (format nil "Serious error: ~A" (snd-strerror err))))))
+    ))
 
 (defun alsa-start (device)
   (let ((err 0))
@@ -211,20 +234,9 @@ body can contain -ref macro, that gets mem-ref of the var.
 
                
                (format t "got: ~A and ~A~%" (cffi:mem-ref buffer-size& :int) *period-size*))
-             
-             (loop
-               with buffer& = (cffi:foreign-alloc :short :count (* 2 *period-size*)) do
-                 (fill-buffer buffer&)
-                 (setf err (snd-pcm-writei (cffi:mem-ref handle&& :pointer) buffer& *period-size*))
-                 
-                 (if (= err -32)
-                     (progn
-                       ;; (princ "underrun")
-                       (snd-pcm-prepare (cffi:mem-ref handle&& :pointer)))
-                     (when (< err 0)
-                       (snd-pcm-recover (cffi:mem-ref handle&& :pointer) err 0)
-                       (error (format nil "Serious error: ~A" (snd-strerror err)))))
-               ))
+
+             (alsa-loop handle&&)
+             )
         
         (format t "closing")
         (unwind-protect 
